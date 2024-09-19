@@ -6,7 +6,5 @@ I wanted to be able to download certain version of Jamf Connect without having t
 [The original script](https://gist.github.com/talkingmoose/94882adb69403a24794f6b84d4ae9de5)
 	
 Originally posted: June 1, 2023
+Updated: Sept 19, 2024
 
-Purpose: Downloads and installs the latest available Jamf Connect software
-for Mac directly on the client. This avoids having to manually download
-and store an up-to-date installer on a distribution server every month.
