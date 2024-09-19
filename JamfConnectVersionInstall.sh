@@ -50,6 +50,11 @@ currentScript=$( /usr/bin/basename -s .sh "$0" )
 # create log file in same directory as script
 logFile="/Library/Logs/$currentScript - $( /bin/date '+%y-%m-%d' ).log"
 
+# Jamf Connect Version target number (Leave blank for latest Connect Version)
+connectVersion=""
+# Optionally update the sha256Checksum value with aknown SHA 256 string
+sha256Checksum="" # e.g. "67b1e8e036c575782b1c9188dd48fa94d9eabcb81947c8632fd4acac7b01644b"
+
 # enter the SHA 256 checksum for the download file
 # download the package and run '/usr/bin/shasum -a 256 /path/to/file.pkg'
 # this will change with each version
@@ -91,8 +96,6 @@ else
     preFlight "Specified script log exists; writing log entries to it"
 fi
 
-sha256Checksum="" # e.g. "67b1e8e036c575782b1c9188dd48fa94d9eabcb81947c8632fd4acac7b01644b"
-
 if [ "$4" != "" ] && [ "$sha256Checksum" = "" ]
 then
 	sha256Checksum=$4
@@ -110,9 +113,6 @@ function logcomment()	{
 # temporary file name for downloaded package
 dmgFile="JamfConnect.dmg"
 pkgFile="JamfConnect.pkg"
-
-# Jamf Connect Version target number (Leave blank for latest Connect Version)
-connectVersion="2.39.0"
 
 # Jamf Connect full download URL to the latest version
 connectURL="https://files.jamfconnect.com/JamfConnect.dmg"
