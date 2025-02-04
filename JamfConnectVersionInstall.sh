@@ -32,15 +32,15 @@
 	- Added in the option to download a targeted version of Jamf Connect
 	- Added in to show the latest version of Jamf Connect
 	- Added in a check to see if the connectVersion variable is set to either download the targeted version or the latest
-  - Added in the option to download a targeted version of Jamf Connect
-  - Added in script version, script name
-  - Added in extra log output
-  - Added in a check for the script log file and creates it if it doesn't exist
+        - Added in the option to download a targeted version of Jamf Connect
+        - Added in script version, script name
+        - Added in extra log output
+        - Added in a check for the script log file and creates it if it doesn't exist
 -------------------------------------------------------------------------------
 ABOUT_THIS_SCRIPT
 
 # Script Version
-scriptVersion="1.2"
+scriptVersion="1.3"
 # Script Name
 scriptName="JamfConnectVersionDownload"
 # path to this script
@@ -48,12 +48,11 @@ currentDirectory=$( /usr/bin/dirname "$0" )
 # name of this script
 currentScript=$( /usr/bin/basename -s .sh "$0" )
 # create log file in same directory as script
-logFile="/Library/Logs/$currentScript - $( /bin/date '+%y-%m-%d' ).log"
-
-# Jamf Connect Version target number (Leave blank for latest Connect Version)
-connectVersion=""
-# Optionally update the sha256Checksum value with aknown SHA 256 string
-sha256Checksum="" # e.g. "67b1e8e036c575782b1c9188dd48fa94d9eabcb81947c8632fd4acac7b01644b"
+logFile="/Library/Logs/$scriptName.log"
+# set to true if you want to open apps after the install
+openApps="true"
+# Connect app path
+appPath="/Applications/Jamf Connect.app"
 
 # enter the SHA 256 checksum for the download file
 # download the package and run '/usr/bin/shasum -a 256 /path/to/file.pkg'
@@ -96,6 +95,8 @@ else
     preFlight "Specified script log exists; writing log entries to it"
 fi
 
+sha256Checksum="" # e.g. "67b1e8e036c575782b1c9188dd48fa94d9eabcb81947c8632fd4acac7b01644b"
+
 if [ "$4" != "" ] && [ "$sha256Checksum" = "" ]
 then
 	sha256Checksum=$4
@@ -113,6 +114,10 @@ function logcomment()	{
 # temporary file name for downloaded package
 dmgFile="JamfConnect.dmg"
 pkgFile="JamfConnect.pkg"
+pkgLAFile="Resources/JamfConnectLaunchAgent.pkg"
+
+# Jamf Connect Version target number (Leave blank for latest Connect Version)
+connectVersion="$5"
 
 # Jamf Connect full download URL to the latest version
 connectURL="https://files.jamfconnect.com/JamfConnect.dmg"
@@ -163,15 +168,15 @@ if [ "$sha256Checksum" = "$downloadChecksum" ] || [ "$sha256Checksum" = "" ]; th
 	notice "Mounted $dmgFile." "Failed to mount $dmgFile."
 	infoOut "Mounted volume: "$appVolume""
 	
-	# install software
-	infoOut "Installing software..."
-	/usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgFile" -target /
-	infoOut "Installed software." "Failed to install software."
+    # install Launch Agent
+    infoOut "Installing Launch Agent..."
+    /usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgLAFile" -target /
+    infoOut "Installed Launch Agent." "Failed to install Launch Agent."
 	
 	# unmount DMG
 	infoOut "Unmounting $dmgFile..."
 	/sbin/umount -f "/Volumes/$appVolume" # forcibly unmount
-	infoOut "Unmounting $dmgFile." "Failed to unmount $dmgFile."
+	infoOut "Unmounted $dmgFile." "Failed to unmount $dmgFile."
 	
 else
 	error "Checksum failed. Recalculate the SHA 256 checksum and try again. Or download may not be valid."
@@ -183,4 +188,13 @@ notice "Deleting DMG..."
 /bin/rm -R "$tempDirectory"
 infoOut "Deleted DMG." "Failed to delete DMG."
 
+  # Optionally open the app
+  if [ "$openApps" = "true" ]; then
+      sleep 0.5
+      infoOut "Opening $appPath to enable Connect and Launch Agent"
+      open -a "$appPath"
+  else
+      infoOut "Skipping opening $appPath"
+  fi
+  
 exit $exitCode
