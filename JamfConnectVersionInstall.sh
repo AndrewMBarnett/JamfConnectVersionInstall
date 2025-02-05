@@ -167,11 +167,16 @@ if [ "$sha256Checksum" = "$downloadChecksum" ] || [ "$sha256Checksum" = "" ]; th
 	appVolume=$( yes | /usr/bin/hdiutil attach -nobrowse "$tempDirectory/$dmgFile" | /usr/bin/grep /Volumes | /usr/bin/sed -e 's/^.*\/Volumes\///g' )
 	notice "Mounted $dmgFile." "Failed to mount $dmgFile."
 	infoOut "Mounted volume: "$appVolume""
-	
-    # install Launch Agent
-    infoOut "Installing Launch Agent..."
-    /usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgLAFile" -target /
-    infoOut "Installed Launch Agent." "Failed to install Launch Agent."
+
+ 	# install software
+	infoOut "Installing software Connect app..."
+	/usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgFile" -target /
+	infoOut "Installed software." "Failed to install software."
+
+        # install Launch Agent
+        infoOut "Installing Launch Agent..."
+        /usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgLAFile" -target /
+        infoOut "Installed Launch Agent." "Failed to install Launch Agent."
 	
 	# unmount DMG
 	infoOut "Unmounting $dmgFile..."
@@ -192,9 +197,12 @@ infoOut "Deleted DMG." "Failed to delete DMG."
   if [ "$openApps" = "true" ]; then
       sleep 0.5
       infoOut "Opening $appPath to enable Connect and Launch Agent"
+      pkill "Jamf Connect" 
       open -a "$appPath"
   else
       infoOut "Skipping opening $appPath"
   fi
+ 
+notice "Goodbye!"
   
 exit $exitCode
