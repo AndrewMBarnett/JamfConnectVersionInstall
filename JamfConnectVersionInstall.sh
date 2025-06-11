@@ -1,208 +1,182 @@
 #!/bin/zsh
 
-:<<ABOUT_THIS_SCRIPT
--------------------------------------------------------------------------------
-
-	Written by:William Smith
-	Partner Program Manager
-	Jamf
-	bill@talkingmoose.net
-	https://gist.github.com/talkingmoose/94882adb69403a24794f6b84d4ae9de5
-	
-	Originally posted: June 1, 2023
-
-	Purpose: Downloads and installs the latest available Jamf Connect software
-	for Mac directly on the client. This avoids having to manually download
-	and store an up-to-date installer on a distribution server every month.
-	
-	Instructions: Optionally update the sha256Checksum value with a
-	known SHA 256 string. Run the script with elevated privileges.
-	If using Jamf Pro, consider replacing the sha256Checksum value
-	with "$4", entering the checksum as script parameter in a policy.
-
-	Except where otherwise noted, this work is licensed under
-	http://creativecommons.org/licenses/by/4.0/
-
-	"If you are going to fail, then fail gloriously."
-
-    Updated on: 09/19/2024
-	Updated by: @andrewmbarnett (https://gist.github.com/AndrewMBarnett)
-	
-	Updates:
-	- Added in the option to download a targeted version of Jamf Connect
-	- Added in to show the latest version of Jamf Connect
-	- Added in a check to see if the connectVersion variable is set to either download the targeted version or the latest
-        - Added in the option to download a targeted version of Jamf Connect
-        - Added in script version, script name
-        - Added in extra log output
-        - Added in a check for the script log file and creates it if it doesn't exist
--------------------------------------------------------------------------------
-ABOUT_THIS_SCRIPT
-
-# Script Version
-scriptVersion="1.3"
-# Script Name
-scriptName="JamfConnectVersionDownload"
-# path to this script
-currentDirectory=$( /usr/bin/dirname "$0" )
-# name of this script
-currentScript=$( /usr/bin/basename -s .sh "$0" )
-# create log file in same directory as script
+### --- Setup --- ###
+scriptVersion="2.1"
+scriptName="JamfConnectInstallUnified"
 logFile="/Library/Logs/$scriptName.log"
-# set to true if you want to open apps after the install
-openApps="true"
-# Connect app path
-appPath="/Applications/Jamf Connect.app"
 
-# enter the SHA 256 checksum for the download file
-# download the package and run '/usr/bin/shasum -a 256 /path/to/file.pkg'
-# this will change with each version
-# leave blank to to skip the checksum verification (less secure) or if using a $4 script parameter with Jamf Pro
+# Script parameters
+# User parameters
+sha256Checksum="" # Can be passed as $4
+if [[ "$4" != "" && "$sha256Checksum" = "" ]]; then sha256Checksum=$4; fi
 
+# Connect Version (by $5) or auto-discover
+connectVersion=""
+openApps="" # Open installed app after install? (default: false)
+if [[ "$openApps" != "true" && "$openApps" != "false" ]]; then
+    openApps="false"
+fi
+connectURL="https://files.jamfconnect.com/JamfConnect.dmg"
+
+# Functions
 function updateScriptLog() {
     echo "${scriptName} ($scriptVersion): $(date +%Y-%m-%d\ %H:%M:%S) - ${1}" | tee -a "${logFile}"
 }
+function preFlight()  { updateScriptLog "[PRE-FLIGHT]      ${1}"; }
+function notice()     { updateScriptLog "[NOTICE]          ${1}"; }
+function infoOut()    { updateScriptLog "[INFO]            ${1}"; }
+function errorOut()   { updateScriptLog "[ERROR]           ${1}"; }
+function fatal()      { errorOut "${1}"; exit 1; }
 
-function preFlight() {
-    updateScriptLog "[PRE-FLIGHT]      ${1}"
-}
-
-function notice() {
-    updateScriptLog "[NOTICE]          ${1}"
-}
-
-function infoOut() {
-    updateScriptLog "[INFO]            ${1}"
-}
-
-function errorOut() {
-    updateScriptLog "[ERROR]           ${1}"
-}
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# Pre-flight Check: Client-side Logging
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-# Create the log file if it does not exist
 if [[ ! -f "${logFile}" ]]; then
-    touch "${logFile}"
-    if [[ -f "${logFile}" ]]; then
-        preFlight "Created specified script log"
-    else
-        fatal "Unable to create specified script log '${logFile}'; exiting.\n\n(Is this script running as 'root' ?)"
-    fi
+    touch "${logFile}" || fatal "Unable to create specified script log '${logFile}'; exiting. (Is this script running as 'root'?)"
+    preFlight "Created specified script log"
 else
     preFlight "Specified script log exists; writing log entries to it"
 fi
 
-sha256Checksum="" # e.g. "67b1e8e036c575782b1c9188dd48fa94d9eabcb81947c8632fd4acac7b01644b"
-
-if [ "$4" != "" ] && [ "$sha256Checksum" = "" ]
-then
-	sha256Checksum=$4
+# Extract 3-field version from latest download
+if [[ -z "$connectVersion" ]]; then
+    appNewVersion=$(curl -fsIL "${connectURL}" | grep "x-amz-meta-version" | grep -o "[0-9]\+\.[0-9]\+\.[0-9]\+")
+    connectVersion="$appNewVersion"
+    infoOut "No connectVersion specified; using latest: $connectVersion"
+else
+    # Normalize if only two-field version given
+    if [[ "$connectVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        connectVersion="${connectVersion}.0"
+    fi
+    infoOut "Target Connect Version set: $connectVersion"
 fi
 
-# functions
-function logcomment()	{
-	if [ $? = 0 ] ; then
-		/bin/date "+%Y-%m-%d %H:%M:%S	$1" >> "$logFile"
-	else
-		/bin/date "+%Y-%m-%d %H:%M:%S	$2" >> "$logFile"
-	fi
+# Compare versions
+versionThreshold="3.0.0"
+
+# Download URL
+if [[ "$connectVersion" == "$appNewVersion" || -z "$connectVersion" ]]; then
+    downloadURL="$connectURL"
+else
+    downloadURL="https://files.jamfconnect.com/JamfConnect-${connectVersion}.dmg"
+fi
+
+# Paths for both version branches
+oldAppPath="/Applications/Jamf Connect.app"
+newAppPath="/Applications/Jamf Connect.app"
+newPkgName="JamfConnectLogin.pkg"
+oldPkgName="JamfConnect.pkg"
+
+# --- Robust version compare, returns 0 if $1 >= $2 ---
+version_gte() {
+    local ver1 ver2
+    local i left right
+    ver1=(${(s:.:)1})  # split $1 on .
+    ver2=(${(s:.:)2})  # split $2 on .
+    while [[ ${#ver1[@]} -lt 3 ]]; do ver1+=("0"); done
+    while [[ ${#ver2[@]} -lt 3 ]]; do ver2+=("0"); done
+
+    for i in 1 2 3; do
+        left=$((10#${ver1[i]}))
+        right=$((10#${ver2[i]}))
+        if (( left > right )); then return 0; fi
+        if (( left < right )); then return 1; fi
+    done
+
+    return 0
 }
 
-# temporary file name for downloaded package
-dmgFile="JamfConnect.dmg"
-pkgFile="JamfConnect.pkg"
-pkgLAFile="Resources/JamfConnectLaunchAgent.pkg"
+### --- Main Branch ---
+if version_gte "$connectVersion" "$versionThreshold"; then
+    # >= 3.0.0 Script Flow (Jamf 3.x+)
+    notice "Jamf Connect version $connectVersion is >= $versionThreshold; using NEW installer method."
+    appPath="$newAppPath"
+    infoOut "Using app path: $appPath"
+    TMP_PATH="/private/tmp"
+    VendorDMG="JamfConnect.dmg"
+    VendorCDR="JamfConnect.cdr"
+    JamfConnectVOLUME="/Volumes/JamfConnectLogin"
+    INSTALLER_PKG_NAME="$newPkgName"
 
-# Jamf Connect Version target number (Leave blank for latest Connect Version)
-connectVersion="$5"
+    TARGET_MOUNT=$3; [[ -z "$TARGET_MOUNT" ]] && TARGET_MOUNT="/"
 
-# Jamf Connect full download URL to the latest version
-connectURL="https://files.jamfconnect.com/JamfConnect.dmg"
-# Jamf Connect latest version available on the website
-appNewVersion=$(curl -fsIL "${connectURL}" | grep "x-amz-meta-version" | grep -o "[0-9.].*[0-9.].*[0-9]")
-notice "Latest Jamf Connect Version: $appNewVersion"
+    infoOut "Downloading JamfConnect $connectVersion DMG to $TMP_PATH/$VendorDMG..."
+    /usr/bin/curl --silent --fail --location "$downloadURL" -o "$TMP_PATH/$VendorDMG"
+    [[ $? -ne 0 ]] && fatal "Download failed. Exiting."
 
-# Check if Connect Version is blank
-if [ "$connectVersion" = "" ]; then
-    infoOut "Connect Version was blank, downloading latest version..."
-    # get the latest version of the product
-    downloadURL="https://files.jamfconnect.com/JamfConnect.dmg"
-    infoOut "Download URL: $downloadURL"
+    infoOut "Converting DMG to CDR..."
+    /usr/bin/hdiutil convert -quiet "$TMP_PATH/$VendorDMG" -format UDTO -o "$TMP_PATH/$VendorCDR"
+    [[ $? -ne 0 ]] && fatal "hdiutil convert failed. Exiting."
+
+    infoOut "Mounting converted DMG as $JamfConnectVOLUME..."
+    /usr/bin/hdiutil attach "${TMP_PATH}/${VendorCDR}" -nobrowse -quiet
+    [[ $? -ne 0 ]] && fatal "Failed to mount CDR. Exiting."
+
+    infoOut "Copying installer from $JamfConnectVOLUME/$INSTALLER_PKG_NAME to /tmp/JamfConnect.pkg"
+    cp -R "$JamfConnectVOLUME/$INSTALLER_PKG_NAME" /tmp/JamfConnect.pkg || fatal "Copy failed. Exiting."
+
+    /usr/bin/hdiutil detach "$JamfConnectVOLUME" > /dev/null 2>&1
+    rm -f "$TMP_PATH/$VendorDMG" "$TMP_PATH/$VendorCDR"
+
+    INSTALLER_FILENAME="/tmp/JamfConnect.pkg"
+    infoOut "Installing $INSTALLER_FILENAME to $TARGET_MOUNT"
+    /usr/sbin/installer -pkg "$INSTALLER_FILENAME" -target "$TARGET_MOUNT" || fatal "Installer failed. Exiting."
+    rm -f "$INSTALLER_FILENAME"
+
+    notice "Jamf Connect $connectVersion installed via NEW method."
+    # Uncomment if you want to enable notify integration (if applicable)
+    # /usr/local/bin/authchanger -reset -JamfConnect -Notify
+
 else
-    notice "Downloading Connect Version: $connectVersion"
-    # this is the full download URL to the latest version of the product
-    downloadURL="https://files.jamfconnect.com/JamfConnect-$connectVersion.dmg"
-    infoOut "Download URL: $downloadURL"
+    # < 3.0.0 Script Flow (Jamf 2.x and earlier)
+    notice "Jamf Connect version $connectVersion is less than $versionThreshold; using OLD installer method."
+    appPath="$oldAppPath"
+    dmgFile="JamfConnect.dmg"
+    infoOut "Using app path: $appPath"
+
+    workDirectory=$(/usr/bin/basename $0)
+    tempDirectory=$(/usr/bin/mktemp -d "/private/tmp/$workDirectory.XXXXXX")
+    infoOut "Changing to working directory '$tempDirectory'"
+    cd "$tempDirectory" || fatal "Failed to cd to temp directory."
+
+    infoOut "Downloading $oldPkgName from $downloadURL"
+    /usr/bin/curl --fail --silent --location "$downloadURL" --output "$dmgFile" || fatal "Download failed. Exiting."
+
+    downloadChecksum=$(/usr/bin/shasum -a 256 "$tempDirectory/$dmgFile" | /usr/bin/awk '{ print $1 }')
+    infoOut "Checksum for downloaded disk image: $downloadChecksum"
+
+    if [[ "$sha256Checksum" = "$downloadChecksum" ]] || [[ -z "$sha256Checksum" ]]; then
+        infoOut "Checksum verified. Installing software..."
+        notice "Mounting $dmgFile..."
+        appVolume=$(yes | /usr/bin/hdiutil attach -nobrowse "$tempDirectory/$dmgFile" | grep "/Volumes/" | sed -e 's/^.*\/Volumes\///g')
+        notice "Mounted $dmgFile. ($appVolume)"
+
+        installerPath="/Volumes/$appVolume/$oldPkgName"
+        infoOut "Installing $installerPath..."
+        /usr/sbin/installer -pkg "$installerPath" -target / || fatal "Installer failed."
+        infoOut "Installed software."
+
+        infoOut "Unmounting $dmgFile..."
+        /sbin/umount -f "/Volumes/$appVolume" || infoOut "Failed to unmount $dmgFile."
+    else
+        fatal "Checksum failed. Recalculate the SHA 256 checksum and try again. Or download may not be valid."
+    fi
+
+    notice "Deleting temp directory..."
+    /bin/rm -R "$tempDirectory"
+    infoOut "Deleted temp directory."
 fi
 
-# create temporary working directory
-infoOut "Creating working directory '$tempDirectory'"
-workDirectory=$( /usr/bin/basename $0 )
-tempDirectory=$( /usr/bin/mktemp -d "/private/tmp/$workDirectory.XXXXXX" )
-
-# change directory to temporary working directory
-infoOut "Changing directory to working directory '$tempDirectory'"
-cd "$tempDirectory"
-
-# download the installer package
-infoOut "Downloading disk image $dmgFile"
-/usr/bin/curl "$downloadURL" \
---location \
---silent \
---output "$dmgFile"
-
-# checksum the download
-downloadChecksum=$( /usr/bin/shasum -a 256 "$tempDirectory/$dmgFile" | /usr/bin/awk '{ print $1 }' )
-infoOut "Checksum for downloaded disk image: $downloadChecksum"
-
-# install the download if checksum validates
-if [ "$sha256Checksum" = "$downloadChecksum" ] || [ "$sha256Checksum" = "" ]; then
-	infoOut "Checksum verified. Installing software..."
-	
-	# mounting DMG
-	notice "Mounting $dmgFile..."
-	appVolume=$( yes | /usr/bin/hdiutil attach -nobrowse "$tempDirectory/$dmgFile" | /usr/bin/grep /Volumes | /usr/bin/sed -e 's/^.*\/Volumes\///g' )
-	notice "Mounted $dmgFile." "Failed to mount $dmgFile."
-	infoOut "Mounted volume: "$appVolume""
-
- 	# install software
-	infoOut "Installing software Connect app..."
-	/usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgFile" -target /
-	infoOut "Installed software." "Failed to install software."
-
-        # install Launch Agent
-        infoOut "Installing Launch Agent..."
-        /usr/sbin/installer -pkg "/Volumes/$appVolume/$pkgLAFile" -target /
-        infoOut "Installed Launch Agent." "Failed to install Launch Agent."
-	
-	# unmount DMG
-	infoOut "Unmounting $dmgFile..."
-	/sbin/umount -f "/Volumes/$appVolume" # forcibly unmount
-	infoOut "Unmounted $dmgFile." "Failed to unmount $dmgFile."
-	
+### --- Open the installed app, if requested ---
+if [[ "$openApps" == "true" ]]; then
+    if [[ -d "$appPath" || -f "$appPath" ]]; then
+        sleep 0.5
+        infoOut "Opening $appPath to enable Connect and Launch Agent"
+        pkill "Jamf Connect"
+        open -a "$appPath"
+    else
+        infoOut "App path $appPath not found, not opening."
+    fi
 else
-	error "Checksum failed. Recalculate the SHA 256 checksum and try again. Or download may not be valid."
-	exit 1
+    infoOut "Skipping opening $appPath"
 fi
 
-# delete DMG
-notice "Deleting DMG..."
-/bin/rm -R "$tempDirectory"
-infoOut "Deleted DMG." "Failed to delete DMG."
-
-  # Optionally open the app
-  if [ "$openApps" = "true" ]; then
-      sleep 0.5
-      infoOut "Opening $appPath to enable Connect and Launch Agent"
-      pkill "Jamf Connect" 
-      open -a "$appPath"
-  else
-      infoOut "Skipping opening $appPath"
-  fi
- 
 notice "Goodbye!"
-  
-exit $exitCode
+exit 0
